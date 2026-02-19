@@ -1,20 +1,51 @@
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-from app.schemas.roles import AddRoleRequest
-from app.services.roles.role_processor import RoleProcessor
+import uuid
+from sqlalchemy import Column, Enum
+from sqlalchemy.dialects.postgresql import UUID
+from app.core.session import Base, scoped_context
+from app.models.base import AuditMixin
+from app.core.enums import RoleEnum
+from app.core.exceptions import NotFoundError
 
 
-roles_router = APIRouter()
 
+class Role(Base, AuditMixin):
+    __tablename__ = "roles"
+    __table_args__ = {"schema": "biporttest"}
 
-@roles_router.post("/add-role-test")
-async def add_role(request: AddRoleRequest) -> JSONResponse:
-    """
-    Add a new role to the database.
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Enum(RoleEnum), nullable=False, unique=True)
+
+class RoleManager:
+
+    @staticmethod
+    def get_role_name(role_id):
+        with scoped_context() as session:
+            row = session.query(Role.name).filter_by(id=role_id).first()
+            if not row:
+                raise NotFoundError(detail= "Role not found")
+            return row[0].value
+        
+
+    @staticmethod
+    def get_all_roles():
+        with scoped_context() as session:
+            return session.query(Role).all()
     
-    Accepts role data as input and stores it in the roles table.
-    Input field: name (e.g., ADMIN, MANAGER, DEVELOPER).
-    Uses the RoleEnum defined in the project as a reference.
-    """
-    response = RoleProcessor.process_add_role(request)
-    return JSONResponse(content={"data": response.data, "error": response.error}, status_code=response.status_code)
+    @staticmethod
+    def create_role(role_name):
+        with scoped_context() as session:
+            new_role = Role(name=role_name)
+            session.add(new_role)
+            session.commit()
+            session.refresh(new_role)
+            return new_role
+
+    @staticmethod
+    def get_role_info():
+        with scoped_context() as session:
+            return (
+                session.query(Role)
+                .filter(Role.name.notin_([RoleEnum.ADMIN]))
+                .all()
+            )
+    
